@@ -1,12 +1,12 @@
 package reverseproxy.loadbalancer
 
-import akka.actor.{ Actor, ActorRef, Props }
+import akka.actor.{Actor, ActorRef, Props}
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.model.Uri
-import reverseproxy.loadbalancer.ServicesBalancer.{ BalancerEvents, HealthCheck }
+import reverseproxy.loadbalancer.ServicesBalancer.{BalancerEvents, HealthCheck}
 
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{ FiniteDuration, _ }
+import scala.concurrent.duration.{FiniteDuration, _}
 import scala.language.postfixOps
 
 object ServicesBalancer {
@@ -14,9 +14,9 @@ object ServicesBalancer {
     Props(new ServicesBalancer(serviceMappings))
 
   trait BalancerEvents { val service: String }
-  case class Get(service: String)                extends BalancerEvents
+  case class Get(service: String)                 extends BalancerEvents
   case class Succeeded(service: String, uri: Uri) extends BalancerEvents
-  case class Failed(service: String, uri: Uri)   extends BalancerEvents
+  case class Failed(service: String, uri: Uri)    extends BalancerEvents
   case class HealthCheck()
 
 }
@@ -29,7 +29,7 @@ class ServicesBalancer(inputMappings: Map[String, Set[Uri]], healthCheckFrequenc
   context.system.scheduler.schedule(0 seconds, healthCheckFrequency, self, HealthCheck())
 
   val singleServiceManagers: Map[String, ActorRef] = inputMappings.map {
-    case (service, uris) => service -> context.system.actorOf(SingleServiceManager.props(uris), service)
+    case (service, uris) => service -> context.actorOf(SingleServiceManager.props(uris), service)
   }
 
   def receive: Receive = {

@@ -1,10 +1,10 @@
 package reverseproxy
 
-import akka.actor.{ ActorRef, ActorSystem }
-import akka.event.{ Logging, LoggingAdapter }
+import akka.actor.{ActorRef, ActorSystem}
+import akka.event.{Logging, LoggingAdapter}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model._
-import akka.http.scaladsl.server.{ HttpApp, Route }
+import akka.http.scaladsl.server.{HttpApp, Route}
 import akka.pattern._
 import akka.util.Timeout
 import com.typesafe.config.Config
@@ -12,9 +12,9 @@ import reverseproxy.loadbalancer.ServicesBalancer
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
-import scala.util.{ Failure, Success }
+import scala.util.{Failure, Success}
 
 class ReverseProxy(config: Config) extends HttpApp {
   implicit val timeout: Timeout     = Timeout(5 seconds)
@@ -39,7 +39,7 @@ class ReverseProxy(config: Config) extends HttpApp {
       }
       .toMap
 
-  val balancer: ActorRef = system.actorOf(ServicesBalancer.props(parseServerMappings(config)))
+  val balancer: ActorRef = system.actorOf(ServicesBalancer.props(parseServerMappings(config)), "Balancer")
   private def getUri(service: String): Future[Option[Uri]] =
     (balancer ? ServicesBalancer.Get(service)).mapTo[Option[Uri]]
   private def succeeded(service: String, uri: Uri): Unit = balancer ! ServicesBalancer.Succeeded(service, uri)

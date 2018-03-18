@@ -9,7 +9,7 @@ import reverseproxy.loadbalancer.ServicesBalancer.{ Failed, Get, HealthCheck, Su
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.language.postfixOps
-import scala.util.{ Failure, Random, Success, Try }
+import scala.util.{ Failure, Success, Try }
 
 object SingleServiceManager {
   def props(mappings: Set[Uri])(implicit log: LoggingAdapter): Props = Props(new SingleServiceManager(mappings))
@@ -19,6 +19,7 @@ class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter
   private implicit val system: ActorSystem  = context.system
   private implicit val ec: ExecutionContext = context.dispatcher
   private val service                       = self.path.name
+  log.info("Started SingleServiceManager for {} at {}", service, self.path)
   private val mappings: mutable.SortedSet[(Int, Uri)] = mutable
     .SortedSet()(SetOrdering) ++ inputMappings.map { case (uri: Uri) => (0, uri) }
   private val hostPortLookup: mutable.Map[Uri, Int] = mutable.Map() ++ mappings.map {
@@ -37,20 +38,22 @@ class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter
     case Failure(_)        => log.warning(s"No service for {} was found", service); None
   }
 
-  private def incrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => i + 1, "increment")
-  private def decrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => i - 1, "decrement")
-  private def failConnection(uri: Uri): Unit      = modify(uri, (_: Int) => Int.MaxValue, "fail")
-  private def unfailConnection(uri: Uri): Unit    = modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i, "unfail")
+  private def incrementConnection(uri: Uri): Unit =
+    modify(uri, (i: Int) => if (i == Int.MaxValue) Int.MaxValue else i + 1, "increment")
+  private def decrementConnection(uri: Uri): Unit =
+    modify(uri, (i: Int) => if (i == Int.MaxValue) Int.MaxValue else i - 1, "decrement")
+  private def failConnection(uri: Uri): Unit =
+    modify(uri, (_: Int) => Int.MaxValue, "fail")
+  private def unfailConnection(uri: Uri): Unit =
+    modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i, "unfail")
   private def modify(uri: Uri, modifier: Int => Int, action: String): Unit = {
     val oldCounter = hostPortLookup.getOrElse(uri, 0)
-    val newCounter = modifier(oldCounter)
+    val newCounter = { val n = modifier(oldCounter); if (n < 0) 0 else n }
     (mappings.remove((oldCounter, uri)), mappings.add((newCounter, uri))) match {
       case (true, true)  => hostPortLookup.update(uri, newCounter)
       case (false, true) => log.info(s"{} is back online at {}", service, uri); hostPortLookup.update(uri, newCounter)
       case _ =>
-        throw new IllegalStateException(
-          s"Unable to $action active connections as expected, multiple entries found for $service at $uri"
-        )
+        log.error(s"Unable to $action active connections as expected, multiple entries found for $service at $uri")
     }
   }
 
@@ -70,10 +73,9 @@ class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter
 }
 
 object SetOrdering extends Ordering[(Int, Uri)] {
-  private val rand = new Random()
   def compare(a: (Int, Uri), b: (Int, Uri)): Int =
     a._1 - b._1 match {
-      case 0 => if (rand.nextBoolean) 1 else -1
+      case 0 => if (a._2.equals(b._2)) 0 else 1
       case i => i
     }
 }
