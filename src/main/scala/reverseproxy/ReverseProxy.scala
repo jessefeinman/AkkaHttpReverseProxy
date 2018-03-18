@@ -43,7 +43,7 @@ class ReverseProxy(config: Config) extends HttpApp {
   private def getUri(service: String): Future[Option[Uri]] =
     (balancer ? ServicesBalancer.Get(service)).mapTo[Option[Uri]]
   private def succeeded(service: String, uri: Uri): Unit = balancer ! ServicesBalancer.Succeeded(service, uri)
-  private def failed(service: String, uri: Uri): Unit   = balancer ! ServicesBalancer.Failed(service, uri)
+  private def failed(service: String, uri: Uri): Unit    = balancer ! ServicesBalancer.Failed(service, uri)
 
   val serviceNotInMappings =
     HttpResponse(
@@ -79,9 +79,7 @@ class ReverseProxy(config: Config) extends HttpApp {
                 .withPath(path)
             )
           )
-          .map(m => {
-            succeeded(service, uri); m
-          })
+          .map(m => { succeeded(service, uri); m })
           .recover {
             case t =>
               log.warning(t.getMessage)
