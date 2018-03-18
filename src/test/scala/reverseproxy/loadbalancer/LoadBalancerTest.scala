@@ -1,7 +1,6 @@
 package reverseproxy.loadbalancer
 
-import akka.actor
-import akka.actor.{ ActorSystem, Props }
+import akka.actor.ActorSystem
 import akka.event.{ Logging, LoggingAdapter }
 import akka.http.scaladsl.model.Uri
 import akka.testkit.{ ImplicitSender, TestKit, TestProbe }
@@ -34,7 +33,7 @@ class LoadBalancerTest
       "serviceB" -> Set(Uri().withHost("host1b"), Uri().withHost("host2b"))
     )
     val testProbe        = TestProbe()
-    val servicesBalancer = system.actorOf(actor.Props(new ServicesBalancer(mapping)), "balancer")
+    val servicesBalancer = system.actorOf(ServicesBalancer.props(mapping), "balancer")
     "Return a URL for a service that exists" in {
       testProbe.send(servicesBalancer, Get("serviceA"))
       testProbe.fishForMessage(max) { case Some(u: Uri) if mapping("serviceA").contains(u) => true }
@@ -78,7 +77,6 @@ class LoadBalancerTest
         }
       }
     }
-    Thread.sleep(5000)
   }
   "SingleServiceManager" - {
     "should initialize with all nodes of the given service" in {}
