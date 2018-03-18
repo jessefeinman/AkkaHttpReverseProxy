@@ -12,19 +12,19 @@ import scala.language.postfixOps
 import scala.util.{ Failure, Success, Try }
 
 object SingleServiceManager {
-  def props(mappings: Set[Uri])(implicit log: LoggingAdapter): Props = Props(new SingleServiceManager(mappings))
+  def props(mappings: Set[Uri], failOnRedirect: Boolean)(implicit log: LoggingAdapter): Props =
+    Props(new SingleServiceManager(mappings, failOnRedirect))
 }
 
-class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter) extends Actor {
+class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean)(implicit log: LoggingAdapter) extends Actor {
   private implicit val system: ActorSystem  = context.system
   private implicit val ec: ExecutionContext = context.dispatcher
   private val service                       = self.path.name
+
+  private val mappings: mutable.SortedSet[(Int, Uri)] = mutable.SortedSet()(SetOrdering) ++ inputMappings.map { case (uri: Uri) => (0, uri) }
+  private val hostPortLookup: mutable.Map[Uri, Int]   = mutable.Map() ++ mappings.map { case (counter: Int, uri: Uri) => uri -> counter }.toMap
+
   log.info("Started SingleServiceManager for {} at {}", service, self.path)
-  private val mappings: mutable.SortedSet[(Int, Uri)] = mutable
-    .SortedSet()(SetOrdering) ++ inputMappings.map { case (uri: Uri) => (0, uri) }
-  private val hostPortLookup: mutable.Map[Uri, Int] = mutable.Map() ++ mappings.map {
-    case (counter: Int, uri: Uri) => uri -> counter
-  }.toMap
 
   def receive: Receive = {
     case Get(_)          => sender ! getConnection
@@ -38,14 +38,10 @@ class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter
     case Failure(_)        => log.warning(s"No service for {} was found", service); None
   }
 
-  private def incrementConnection(uri: Uri): Unit =
-    modify(uri, (i: Int) => if (i == Int.MaxValue) Int.MaxValue else i + 1, "increment")
-  private def decrementConnection(uri: Uri): Unit =
-    modify(uri, (i: Int) => if (i == Int.MaxValue) Int.MaxValue else i - 1, "decrement")
-  private def failConnection(uri: Uri): Unit =
-    modify(uri, (_: Int) => Int.MaxValue, "fail")
-  private def unfailConnection(uri: Uri): Unit =
-    modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i, "unfail")
+  private def incrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => if (i == Int.MaxValue) Int.MaxValue else i + 1, "increment")
+  private def decrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i - 1, "decrement")
+  private def failConnection(uri: Uri): Unit      = modify(uri, (_: Int) => Int.MaxValue, "fail")
+  private def unfailConnection(uri: Uri): Unit    = modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i, "unfail")
   private def modify(uri: Uri, modifier: Int => Int, action: String): Unit = {
     val oldCounter = hostPortLookup.getOrElse(uri, 0)
     val newCounter = { val n = modifier(oldCounter); if (n < 0) 0 else n }
@@ -62,10 +58,11 @@ class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter
       case (count, uri) =>
         Http().singleRequest(HttpRequest(method = HttpMethods.HEAD, uri = uri.withScheme("http"))).onComplete {
           case Success(httpResponse) =>
-            httpResponse.status.isSuccess match {
-              case ok if ok && count != Int.MaxValue => Unit
-              case unfail if unfail                  => unfailConnection(uri)
-              case _                                 => failConnection(uri)
+            httpResponse.status match {
+              case s if s.isSuccess && count == Int.MaxValue => unfailConnection(uri)
+              case s if failOnRedirect && s.isRedirection    => failConnection(uri)
+              case s if s.isFailure                          => failConnection(uri)
+              case _ => Unit
             }
           case Failure(_) => failConnection(uri)
         }

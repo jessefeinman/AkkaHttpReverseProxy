@@ -1,12 +1,12 @@
 package reverseproxy.loadbalancer
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{ Actor, ActorRef, Props }
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.model.Uri
-import reverseproxy.loadbalancer.ServicesBalancer.{BalancerEvents, HealthCheck}
+import reverseproxy.loadbalancer.ServicesBalancer.{ BalancerEvents, HealthCheck }
 
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{ FiniteDuration, _ }
 import scala.language.postfixOps
 
 object ServicesBalancer {
@@ -18,18 +18,19 @@ object ServicesBalancer {
   case class Succeeded(service: String, uri: Uri) extends BalancerEvents
   case class Failed(service: String, uri: Uri)    extends BalancerEvents
   case class HealthCheck()
-
 }
 
-class ServicesBalancer(inputMappings: Map[String, Set[Uri]], healthCheckFrequency: FiniteDuration = 30 seconds)(
-  implicit log: LoggingAdapter
-) extends Actor {
+class ServicesBalancer(inputMappings: Map[String, Set[Uri]],
+                       failOnRedirect: Boolean              = true,
+                       healthCheckOn: Boolean               = true,
+                       healthCheckFrequency: FiniteDuration = 30 seconds)(implicit log: LoggingAdapter)
+    extends Actor {
   private implicit val ec: ExecutionContext = context.dispatcher
 
-  context.system.scheduler.schedule(0 seconds, healthCheckFrequency, self, HealthCheck())
+  if (healthCheckOn) context.system.scheduler.schedule(0 seconds, healthCheckFrequency, self, HealthCheck())
 
   val singleServiceManagers: Map[String, ActorRef] = inputMappings.map {
-    case (service, uris) => service -> context.actorOf(SingleServiceManager.props(uris), service)
+    case (service, uris) => service -> context.actorOf(SingleServiceManager.props(uris, failOnRedirect), service)
   }
 
   def receive: Receive = {

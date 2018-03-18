@@ -1,13 +1,14 @@
 package reverseproxy.loadbalancer
 
-import akka.actor.ActorSystem
+import akka.actor
+import akka.actor.{ ActorSystem, Props }
 import akka.event.{ Logging, LoggingAdapter }
 import akka.http.scaladsl.model.Uri
 import akka.testkit.{ ImplicitSender, TestKit, TestProbe }
 import akka.util.Timeout
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{ BeforeAndAfterAll, FreeSpecLike, Matchers }
-import reverseproxy.loadbalancer.ServicesBalancer.{ Get, Succeeded }
+import reverseproxy.loadbalancer.ServicesBalancer.{ Failed, Get, Succeeded }
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -20,7 +21,7 @@ class LoadBalancerTest
     with BeforeAndAfterAll
     with ScalaFutures {
 
-  val max = 5 seconds
+  val max: FiniteDuration = 5 seconds
   def awaitAssert[A](a: => A): A = awaitAssert(a, max, 100 milliseconds)
   implicit val timeout: Timeout    = Timeout(max)
   implicit val log: LoggingAdapter = Logging(system.eventStream, system.name)
@@ -33,7 +34,7 @@ class LoadBalancerTest
       "serviceB" -> Set(Uri().withHost("host1b"), Uri().withHost("host2b"))
     )
     val testProbe        = TestProbe()
-    val servicesBalancer = system.actorOf(ServicesBalancer.props(mapping), "balancer")
+    val servicesBalancer = system.actorOf(actor.Props(new ServicesBalancer(mapping)), "balancer")
     "Return a URL for a service that exists" in {
       testProbe.send(servicesBalancer, Get("serviceA"))
       testProbe.fishForMessage(max) { case Some(u: Uri) if mapping("serviceA").contains(u) => true }
@@ -56,11 +57,9 @@ class LoadBalancerTest
         case Some(u: Uri) => u
       }) should contain theSameElementsAs mapping("serviceA")
     }
-    "should balance Succeeded messages" in {
+    "should send the least used service when calling get Succeeded messages" in {
       testProbe.send(servicesBalancer, Succeeded("serviceA", mapping("serviceA").head))
-      testProbe.send(servicesBalancer, Succeeded("serviceA", mapping("serviceA").head))
-      testProbe.send(servicesBalancer, Succeeded("serviceA", mapping("serviceA").head))
-      for (_ <- Range(0, 5)) {
+      for (i <- Range(0, 5)) {
         testProbe.send(servicesBalancer, Succeeded("serviceA", mapping("serviceA").head))
         testProbe.send(servicesBalancer, Get("serviceA"))
         testProbe.fishForMessage(max) {
@@ -68,8 +67,18 @@ class LoadBalancerTest
           case Some(u: Uri) if u == mapping("serviceA").tail.head => false
         }
       }
-
     }
+    "should set failed services to the lowest priority" in {
+      testProbe.send(servicesBalancer, Failed("serviceA", mapping("serviceA").head))
+      for (i <- Range(0, 5)) {
+        testProbe.send(servicesBalancer, Get("serviceA"))
+        testProbe.fishForMessage(max) {
+          case Some(u: Uri) if u == mapping("serviceA").head      => false
+          case Some(u: Uri) if u == mapping("serviceA").tail.head => true
+        }
+      }
+    }
+    Thread.sleep(5000)
   }
   "SingleServiceManager" - {
     "should initialize with all nodes of the given service" in {}
