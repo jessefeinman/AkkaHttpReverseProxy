@@ -9,7 +9,7 @@ import reverseproxy.loadbalancer.ServicesBalancer.{ Failed, Get, HealthCheck, Su
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.language.postfixOps
-import scala.util.{ Failure, Success, Try }
+import scala.util.{ Failure, Random, Success, Try }
 
 object SingleServiceManager {
   def props(mappings: Set[Uri])(implicit log: LoggingAdapter): Props = Props(new SingleServiceManager(mappings))
@@ -20,16 +20,16 @@ class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter
   private implicit val ec: ExecutionContext = context.dispatcher
   private val service                       = self.path.name
   private val mappings: mutable.SortedSet[(Int, Uri)] = mutable
-    .SortedSet()(Ordering.by[(Int, Uri), Int](_._1)) ++ inputMappings.map { case (uri: Uri) => (0, uri) }
+    .SortedSet()(SetOrdering) ++ inputMappings.map { case (uri: Uri) => (0, uri) }
   private val hostPortLookup: mutable.Map[Uri, Int] = mutable.Map() ++ mappings.map {
     case (counter: Int, uri: Uri) => uri -> counter
   }.toMap
 
   def receive: Receive = {
-    case Get(_)         => sender ! getConnection
+    case Get(_)          => sender ! getConnection
     case Succeeded(_, u) => decrementConnection(u)
-    case Failed(_, u)   => failConnection(u)
-    case HealthCheck()  => healthCheck()
+    case Failed(_, u)    => failConnection(u)
+    case HealthCheck()   => healthCheck()
   }
 
   private def getConnection: Option[Uri] = Try(mappings.firstKey) match {
@@ -66,5 +66,14 @@ class SingleServiceManager(inputMappings: Set[Uri])(implicit log: LoggingAdapter
             }
           case Failure(_) => failConnection(uri)
         }
+    }
+}
+
+object SetOrdering extends Ordering[(Int, Uri)] {
+  private val rand = new Random()
+  def compare(a: (Int, Uri), b: (Int, Uri)): Int =
+    a._1 - b._1 match {
+      case 0 => if (rand.nextBoolean) 1 else -1
+      case i => i
     }
 }
