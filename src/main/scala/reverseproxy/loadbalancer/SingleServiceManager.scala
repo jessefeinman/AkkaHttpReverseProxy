@@ -4,7 +4,7 @@ import akka.actor.{ Actor, ActorSystem, Props }
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{ HttpMethods, HttpRequest, Uri }
-import reverseproxy.loadbalancer.ServicesBalancer.{ Failed, Get, HealthCheck, Succeeded }
+import reverseproxy.loadbalancer.ServicesBalancer._
 
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
@@ -27,6 +27,7 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean)(imp
   log.info("Started SingleServiceManager for {} at {}", service, self.path)
 
   def receive: Receive = {
+    case State(_)        => sender ! (mappings, hostPortLookup)
     case Get(_)          => sender ! getConnection
     case Succeeded(_, u) => decrementConnection(u)
     case Failed(_, u)    => failConnection(u)
@@ -38,13 +39,23 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean)(imp
     case Failure(_)        => log.warning(s"No service for {} was found", service); None
   }
 
-  private def incrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => if (i == Int.MaxValue) Int.MaxValue else i + 1, "increment")
-  private def decrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i - 1, "decrement")
-  private def failConnection(uri: Uri): Unit      = modify(uri, (_: Int) => Int.MaxValue, "fail")
-  private def unfailConnection(uri: Uri): Unit    = modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i, "unfail")
-  private def modify(uri: Uri, modifier: Int => Int, action: String): Unit = {
+  sealed trait Action
+  case object Increment extends Action
+  case object Decrement extends Action
+  case object Fail      extends Action
+  case object Unfail    extends Action
+
+  private def incrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => if (i == Int.MaxValue) Int.MaxValue else i + 1, Increment)
+  private def decrementConnection(uri: Uri): Unit = modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i - 1, Decrement)
+  private def failConnection(uri: Uri): Unit      = modify(uri, (_: Int) => Int.MaxValue, Fail)
+  private def unfailConnection(uri: Uri): Unit    = modify(uri, (i: Int) => if (i == Int.MaxValue) 0 else i, Unfail)
+
+  private def modify(uri: Uri, modifier: Int => Int, action: Action): Unit = {
     val oldCounter = hostPortLookup.getOrElse(uri, 0)
-    val newCounter = { val n = modifier(oldCounter); if (n < 0) 0 else n }
+    val newCounter = {
+      val n = modifier(oldCounter);
+      if (n < 0) 0 else n
+    }
     (mappings.remove((oldCounter, uri)), mappings.add((newCounter, uri))) match {
       case (true, true)  => hostPortLookup.update(uri, newCounter)
       case (false, true) => log.info(s"{} is back online at {}", service, uri); hostPortLookup.update(uri, newCounter)

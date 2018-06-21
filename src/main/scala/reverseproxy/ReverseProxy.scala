@@ -28,11 +28,20 @@ class ReverseProxy(config: Config) extends HttpApp {
       .asScala
       .map { c =>
         c.getString("service") ->
-        c.getConfigList("nodes").asScala.map(n => Uri().withHost(n.getString("host")).withPort(n.getInt("port"))).toSet
+        c.getConfigList("nodes")
+          .asScala
+          .map(
+            n =>
+              Uri()
+                .withHost(n.getString("host"))
+                .withScheme(n.getString("protocol"))
+                .withPort(n.getInt("port"))
+          )
+          .toSet
       }
       .toMap
 
-  val balancer: ActorRef = system.actorOf(ServicesBalancer.props(parseServerMappings(config)), "Balancer")
+  val balancer: ActorRef = system.actorOf(ServicesBalancer.props(parseServerMappings(config)), "balancer")
 
   private def getUri(service: String): Future[Option[Uri]] = (balancer ? ServicesBalancer.Get(service)).mapTo[Option[Uri]]
   private def succeeded(service: String, uri: Uri): Unit   = balancer ! ServicesBalancer.Succeeded(service, uri)
@@ -62,7 +71,9 @@ class ReverseProxy(config: Config) extends HttpApp {
       case Some(uri) =>
         Http.apply
           .singleRequest(request.withUri(request.uri.withHost(uri.authority.host).withPort(uri.authority.port).withPath(path)))
-          .map(m => { succeeded(service, uri); m })
+          .map { r =>
+            succeeded(service, uri); r
+          }
           .recover {
             case t =>
               log.warning(t.getMessage)

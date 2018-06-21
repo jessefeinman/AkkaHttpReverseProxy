@@ -1,13 +1,13 @@
 package reverseproxy.loadbalancer
 
 import akka.actor.ActorSystem
-import akka.event.{ Logging, LoggingAdapter }
+import akka.event.{Logging, LoggingAdapter}
 import akka.http.scaladsl.model.Uri
-import akka.testkit.{ ImplicitSender, TestKit, TestProbe }
+import akka.testkit.{ImplicitSender, TestKit, TestProbe}
 import akka.util.Timeout
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{ BeforeAndAfterAll, FreeSpecLike, Matchers }
-import reverseproxy.loadbalancer.ServicesBalancer.{ Failed, Get, Succeeded }
+import org.scalatest.{BeforeAndAfterAll, FreeSpecLike, Matchers}
+import reverseproxy.loadbalancer.ServicesBalancer.{Failed, Get, Succeeded}
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -79,7 +79,9 @@ class LoadBalancerTest
     }
   }
   "SingleServiceManager" - {
-    "should initialize with all nodes of the given service" in {}
+    "should initialize with all nodes of the given service" in {
+
+    }
     "should track the number of active connections" in {}
     "should set failed connections to the lowest priority" in {}
     "should prioritize the least used node" in {}
