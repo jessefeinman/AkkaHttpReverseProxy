@@ -1,17 +1,16 @@
 package reverseproxy.loadbalancer
 
-import akka.actor.{ Actor, ActorSystem, Props }
+import akka.actor.{Actor, ActorSystem, Props}
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{ HttpMethods, HttpRequest, Uri }
-import akka.parboiled2.RuleTrace.Fail
-import reverseproxy.loadbalancer.ServicesBalancer.{ HealthCheck, _ }
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, Uri}
+import reverseproxy.loadbalancer.ServicesBalancer.{HealthCheck, _}
 
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{ FiniteDuration, _ }
+import scala.concurrent.duration.{FiniteDuration, _}
 import scala.language.postfixOps
-import scala.math.{ log, log10, pow }
+import scala.math.{log, log10, pow}
 
 object SingleServiceManager {
   def props(mappings: Set[Uri], failOnRedirect: Boolean, selectionCriteria: (Int, FiniteDuration) => Int = activeConnectionsCriteria)(
