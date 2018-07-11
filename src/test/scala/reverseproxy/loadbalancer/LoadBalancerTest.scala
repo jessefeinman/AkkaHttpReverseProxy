@@ -1,13 +1,13 @@
 package reverseproxy.loadbalancer
 
 import akka.actor.ActorSystem
-import akka.event.{Logging, LoggingAdapter}
+import akka.event.{ Logging, LoggingAdapter }
 import akka.http.scaladsl.model.Uri
-import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import akka.testkit.{ ImplicitSender, TestKit, TestProbe }
 import akka.util.Timeout
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{BeforeAndAfterAll, FreeSpecLike, Matchers}
-import reverseproxy.loadbalancer.ServicesBalancer.{Failed, Get, Succeeded}
+import org.scalatest.{ BeforeAndAfterAll, FreeSpecLike, Matchers }
+import reverseproxy.loadbalancer.ServicesBalancer._
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -77,14 +77,39 @@ class LoadBalancerTest
         }
       }
     }
-  }
-  "SingleServiceManager" - {
-    "should initialize with all nodes of the given service" in {
-
+    "return the state of the nodes" in {
+      testProbe.send(servicesBalancer, State("serviceA"))
+      testProbe.fishForMessage(max) {
+        case _: Map[Uri, Weight] => true
+        case _                   => false
+      }
     }
-    "should track the number of active connections" in {}
-    "should set failed connections to the lowest priority" in {}
-    "should prioritize the least used node" in {}
-  }
+    "return all the nodes" in {
+      testProbe.send(servicesBalancer, State("balancer"))
+      testProbe.fishForMessage(max) {
+        case _: Iterable[String] => true
+        case _                   => false
+      }
+    }
+    "AdHoc create new nodes" in {
+      testProbe.send(servicesBalancer, AdHoc("adHocService", Uri().withHost("myHost").withPort(0)))
+      testProbe.send(servicesBalancer, State("balancer"))
+      testProbe.fishForMessage(max) {
+        case i: Iterable[String] if i.toList.contains("adHocService") => true
+        case _ => false
+      }
+    }
+    "SingleServiceManager" - {
+      "should initialize with all nodes of the given service" in {}
+      "should track the number of active connections" in {}
+      "should set failed connections to the lowest priority" in {}
+      "should unfail connections" in {}
+      "should prioritize the least used node" in {}
+      "should prioritize by response time" in {}
+      "should prioritize by response time and number of connections" in {}
+      "should update connection speed" in {}
+      "should perform a health check on all URIs and update their stats" in {}
+    }
 
+  }
 }

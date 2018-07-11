@@ -1,16 +1,16 @@
 package reverseproxy.loadbalancer
 
-import akka.actor.{Actor, ActorSystem, Props}
+import akka.actor.{ Actor, ActorRef, ActorSystem, Props }
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpMethods, HttpRequest, Uri}
-import reverseproxy.loadbalancer.ServicesBalancer.{HealthCheck, _}
+import akka.http.scaladsl.model.{ HttpMethods, HttpRequest, Uri }
+import reverseproxy.loadbalancer.ServicesBalancer.{ HealthCheck, _ }
 
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{ FiniteDuration, _ }
 import scala.language.postfixOps
-import scala.math.{log, log10, pow}
+import scala.math.{ log, log10, pow }
 
 object SingleServiceManager {
   def props(mappings: Set[Uri], failOnRedirect: Boolean, selectionCriteria: (Int, FiniteDuration) => Int = activeConnectionsCriteria)(
@@ -42,6 +42,26 @@ object SingleServiceManager {
       i + { val div = d.toMillis / millisDivisor; div * div }.toInt
     } else { (i: Int, d: FiniteDuration) =>
       i + pow(d.toMillis / millisDivisor, exp).toInt
+    }
+
+  def healthCheck(service: String, aRef: ActorRef, mappings: Mappings, failOnRedirect: Boolean)(implicit system: ActorSystem, ec: ExecutionContext): Unit =
+    mappings.state.foreach {
+      case (uri, weight) =>
+        val start = System.nanoTime()
+        Http()
+          .singleRequest(HttpRequest(method = HttpMethods.HEAD))
+          .map { httpResponse =>
+            val end = { (System.nanoTime() - start) nanos }
+            httpResponse.status match {
+              case s if s.isSuccess && weight.weight == Int.MaxValue =>
+                Seq(ConnectionSpeed(service, uri, end), Unfailed(service, uri))
+              case s if failOnRedirect && s.isRedirection => Seq(Failed(service, uri))
+              case s if s.isFailure                       => Seq(Failed(service, uri))
+              case _ => Seq(ConnectionSpeed(service, uri, end))
+            }
+          }
+          .recover { case _ => Seq(Failed(service, uri)) }
+          .onComplete(_.foreach(aRef.tell(_, aRef)))
     }
 }
 
@@ -101,7 +121,7 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean, sel
     case Failed(_, u)             => failConnection(u)
     case Unfailed(_, u)           => unfailConnection(u)
     case ConnectionSpeed(_, u, d) => mappings.updateSpeed(u, d)
-    case HealthCheck              => healthCheck()
+    case HealthCheck              => SingleServiceManager.healthCheck(service, self, mappings, failOnRedirect)
   }
 
   private def getConnection: Option[Uri] = mappings.first match {
@@ -113,24 +133,4 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean, sel
   private def decrementConnection(uri: Uri): Unit = mappings.updateActiveConnections(uri, (i: Int) => if (i == Int.MaxValue) 0 else i - 1)
   private def failConnection(uri: Uri): Unit      = mappings.updateActiveConnections(uri, (_: Int) => Int.MaxValue)
   private def unfailConnection(uri: Uri): Unit    = mappings.updateActiveConnections(uri, (i: Int) => if (i == Int.MaxValue) 0 else i)
-
-  private def healthCheck(): Unit =
-    mappings.state.foreach {
-      case (uri, weight) =>
-        val start = System.nanoTime()
-        Http()
-          .singleRequest(HttpRequest(method = HttpMethods.HEAD))
-          .map { httpResponse =>
-            val end = { (System.nanoTime() - start) nanos }
-            httpResponse.status match {
-              case s if s.isSuccess && weight.weight == Int.MaxValue =>
-                Seq(ConnectionSpeed(service, uri, end), Unfailed(service, uri))
-              case s if failOnRedirect && s.isRedirection => Seq(Failed(service, uri))
-              case s if s.isFailure                       => Seq(Failed(service, uri))
-              case _ => Seq(ConnectionSpeed(service, uri, end))
-            }
-          }
-          .recover { case _ => Seq(Failed(service, uri)) }
-          .onComplete(_.foreach(self.tell(_, self)))
-    }
 }
