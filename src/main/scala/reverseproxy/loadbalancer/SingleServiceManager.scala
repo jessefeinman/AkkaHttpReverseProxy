@@ -65,7 +65,9 @@ object SingleServiceManager {
     }
 }
 
-case class Weight(weight: Int, activeConnections: Int, time: FiniteDuration)
+case class Weight(weight: Int, activeConnections: Int, time: FiniteDuration){
+  override def toString: String = s"Weight(CalculatedWeight: $weight, activeConnections: $activeConnections, pingTime: $time)"
+}
 case class Mappings(in: Set[Uri], newWeight: (Int, FiniteDuration) => Int) {
 
   object SetOrdering extends Ordering[(Weight, Uri)] {
