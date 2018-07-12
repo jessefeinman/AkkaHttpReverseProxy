@@ -55,7 +55,7 @@ class ReverseProxy(config: Config) extends HttpApp {
     HttpResponse(status = StatusCodes.RequestTimeout, entity = HttpEntity("Request to service timed out"))
 
   def routes: Route = get {
-    path("adHocService") {
+    pathPrefix("adHocService") {
       extract(_.request) { request =>
         newAdHocService(request) match {
           case Success(_) =>
@@ -67,7 +67,7 @@ class ReverseProxy(config: Config) extends HttpApp {
         }
       }
     } ~
-    path("currentState") {
+    pathPrefix("currentState") {
       extract(_.request) { request =>
         onComplete(queryState(request)) {
           case Success(response) =>
@@ -108,7 +108,8 @@ class ReverseProxy(config: Config) extends HttpApp {
             getState(svc).map((svc, _))
           })
         }.flatten.map(_.toMap.toString())
-      case service: String => getState(service).map(_.toString())
+      case service: String =>
+        getState(service).map(_.toString())
     }
 
   private def requestToService(request: HttpRequest): Future[HttpResponse] = {
