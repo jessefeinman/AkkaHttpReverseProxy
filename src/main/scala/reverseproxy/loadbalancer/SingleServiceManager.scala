@@ -94,18 +94,28 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean, sel
 
   private val mappings = Mappings(inputMappings, selectionCriteria)
 
-  system.scheduler.schedule(0 seconds, 10 seconds, self, HealthCheck)
-
   log.info("Started SingleServiceManager for {} at {}", service, self.path)
 
   def receive: Receive = {
-    case State(_)                 => sender ! mappings.state
-    case Get(_)                   => sender ! getConnection
-    case Succeeded(_, u)          => decrementConnection(u)
-    case Failed(_, u)             => failConnection(u)
-    case Unfailed(_, u)           => unfailConnection(u)
-    case ConnectionSpeed(_, u, d) => mappings.updateSpeed(u, d)
-    case HealthCheck              => healthCheck(service, failOnRedirect)
+    case State(_) => sender ! mappings.state
+    case Get(_) =>
+      sender ! getConnection
+      log.debug("After get, {}'s new state is {}", service, mappings.state)
+    case Succeeded(_, u) =>
+      decrementConnection(u)
+      log.debug("After succeded, {}'s new state is {}", service, mappings.state)
+    case Failed(_, u) =>
+      failConnection(u)
+      log.debug("After failed, {}'s new state is {}", service, mappings.state)
+    case Unfailed(_, u) =>
+      unfailConnection(u)
+      log.debug("After unfailed, {}'s new state is {}", service, mappings.state)
+    case ConnectionSpeed(_, u, d) =>
+      mappings.updateSpeed(u, d)
+      log.debug("After speed, {}'s new state is {}", service, mappings.state)
+    case HealthCheck =>
+      log.debug("Running health check for {}", service)
+      healthCheck(service, failOnRedirect)
   }
 
   private def getConnection: Option[Uri] = mappings.first match {

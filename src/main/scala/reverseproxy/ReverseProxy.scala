@@ -41,7 +41,8 @@ class ReverseProxy(config: Config) extends HttpApp {
       }
       .toMap
 
-  val balancer: ActorRef = system.actorOf(ServicesBalancer.props(parseServerMappings(config)), "balancer")
+  val balancer: ActorRef =
+    system.actorOf(ServicesBalancer.props(parseServerMappings(config), false, true, 60 seconds), "balancer")
 
   private def getState(service: String): Future[Map[Uri, Weight]] = (balancer ? ServicesBalancer.State(service)).mapTo[Map[Uri, Weight]]
   private def getStateOfBalancer: Future[Iterable[String]]        = (balancer ? ServicesBalancer.State("balancer")).mapTo[Iterable[String]]
@@ -89,14 +90,16 @@ class ReverseProxy(config: Config) extends HttpApp {
     }
   }
 
+  private val portRegex = ":\\d+".r
   private def newAdHocService(request: HttpRequest): Try[Unit] = Try {
-    val uriString       = request.uri.path.tail.tail.tail.tail.toString()
-    val portRegex       = ":\\d+".r
-    val portRegex(port) = uriString
+    val uriString = request.uri.path.tail.tail.tail.tail.tail.toString()
+    val port      = portRegex.findFirstIn(uriString).map(_.tail.toInt).getOrElse(80)
     val uri = Uri()
       .withHost(uriString.replaceFirst(":\\d+", ""))
-      .withPort(port.tail.toInt)
+      .withPort(port)
+      .withScheme("http")
     val service = request.uri.path.tail.tail.tail.head.toString
+    log.info("Adding service {} with uri {}", service, uri)
     balancer ! ServicesBalancer.AdHoc(service, uri)
   }
 
