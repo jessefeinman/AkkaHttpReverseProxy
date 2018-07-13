@@ -43,29 +43,9 @@ object SingleServiceManager {
     } else { (i: Int, d: FiniteDuration) =>
       i + pow(d.toMillis / millisDivisor, exp).toInt
     }
-
-  def healthCheck(service: String, aRef: ActorRef, mappings: Mappings, failOnRedirect: Boolean)(implicit system: ActorSystem, ec: ExecutionContext): Unit =
-    mappings.state.foreach {
-      case (uri, weight) =>
-        val start = System.nanoTime()
-        Http()
-          .singleRequest(HttpRequest(method = HttpMethods.HEAD))
-          .map { httpResponse =>
-            val end = { (System.nanoTime() - start) nanos }
-            httpResponse.status match {
-              case s if s.isSuccess && weight.weight == Int.MaxValue =>
-                Seq(ConnectionSpeed(service, uri, end), Unfailed(service, uri))
-              case s if failOnRedirect && s.isRedirection => Seq(Failed(service, uri))
-              case s if s.isFailure                       => Seq(Failed(service, uri))
-              case _ => Seq(ConnectionSpeed(service, uri, end))
-            }
-          }
-          .recover { case _ => Seq(Failed(service, uri)) }
-          .onComplete(_.foreach(aRef.tell(_, aRef)))
-    }
 }
 
-case class Weight(weight: Int, activeConnections: Int, time: FiniteDuration){
+case class Weight(weight: Int, activeConnections: Int, time: FiniteDuration) {
   override def toString: String = s"Weight(CalculatedWeight: $weight, activeConnections: $activeConnections, pingTime: $time)"
 }
 case class Mappings(in: Set[Uri], newWeight: (Int, FiniteDuration) => Int) {
@@ -114,6 +94,8 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean, sel
 
   private val mappings = Mappings(inputMappings, selectionCriteria)
 
+  system.scheduler.schedule(0 seconds, 10 seconds, self, HealthCheck)
+
   log.info("Started SingleServiceManager for {} at {}", service, self.path)
 
   def receive: Receive = {
@@ -123,7 +105,7 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean, sel
     case Failed(_, u)             => failConnection(u)
     case Unfailed(_, u)           => unfailConnection(u)
     case ConnectionSpeed(_, u, d) => mappings.updateSpeed(u, d)
-    case HealthCheck              => SingleServiceManager.healthCheck(service, self, mappings, failOnRedirect)
+    case HealthCheck              => healthCheck(service, failOnRedirect)
   }
 
   private def getConnection: Option[Uri] = mappings.first match {
@@ -135,4 +117,23 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean, sel
   private def decrementConnection(uri: Uri): Unit = mappings.updateActiveConnections(uri, (i: Int) => if (i == Int.MaxValue) 0 else i - 1)
   private def failConnection(uri: Uri): Unit      = mappings.updateActiveConnections(uri, (_: Int) => Int.MaxValue)
   private def unfailConnection(uri: Uri): Unit    = mappings.updateActiveConnections(uri, (i: Int) => if (i == Int.MaxValue) 0 else i)
+
+  def healthCheck(service: String, failOnRedirect: Boolean)(implicit system: ActorSystem, ec: ExecutionContext): Unit =
+    mappings.state.foreach {
+      case (uri, weight) =>
+        val start = System.nanoTime()
+        Http()
+          .singleRequest(HttpRequest(method = HttpMethods.GET).withUri(uri))
+          .map { httpResponse =>
+            val end = { (System.nanoTime() - start) nanos }
+            httpResponse.status match {
+              case s if s.isSuccess && weight.weight == Int.MaxValue => Seq(ConnectionSpeed(service, uri, end), Unfailed(service, uri))
+              case s if failOnRedirect && s.isRedirection            => Seq(Failed(service, uri))
+              case s if s.isFailure                                  => Seq(Failed(service, uri))
+              case _ => Seq(ConnectionSpeed(service, uri, end))
+            }
+          }
+          .recover { case _ => Seq(Failed(service, uri)) }
+          .foreach(_.foreach(self.tell(_, self)))
+    }
 }
