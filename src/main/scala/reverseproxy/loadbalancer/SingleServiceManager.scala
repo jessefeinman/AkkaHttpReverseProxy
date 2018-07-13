@@ -118,7 +118,7 @@ class SingleServiceManager(inputMappings: Set[Uri], failOnRedirect: Boolean, sel
   private def failConnection(uri: Uri): Unit      = mappings.updateActiveConnections(uri, (_: Int) => Int.MaxValue)
   private def unfailConnection(uri: Uri): Unit    = mappings.updateActiveConnections(uri, (i: Int) => if (i == Int.MaxValue) 0 else i)
 
-  def healthCheck(service: String, failOnRedirect: Boolean)(implicit system: ActorSystem, ec: ExecutionContext): Unit =
+  def healthCheck(service: String, failOnRedirect: Boolean): Unit =
     mappings.state.foreach {
       case (uri, weight) =>
         val start = System.nanoTime()
